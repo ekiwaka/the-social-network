@@ -1,0 +1,78 @@
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: social_media
+      MYSQL_USER: user
+      MYSQL_PASSWORD: password
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.10.0
+    environment:
+      - discovery.type=single-node
+    ports:
+      - "9200:9200"
+
+  user_service:
+    build: 
+      context: ./user_service
+      dockerfile: src/dockerfile
+    environment:
+      - DATABASE_URL=mysql+pymysql://user:password@mysql/social_media
+    depends_on:
+      - mysql
+
+  discussion_service:
+    build: 
+      context: ./discussion_service
+      dockerfile: src/dockerfile
+    environment:
+      - DATABASE_URL=mysql+pymysql://user:password@mysql/social_media
+    depends_on:
+      - mysql
+
+  comment_service:
+    build: 
+      context: ./comment_service
+      dockerfile: src/dockerfile
+    environment:
+      - DATABASE_URL=mysql+pymysql://user:password@mysql/social_media
+    depends_on:
+      - mysql
+
+  like_service:
+    build: 
+      context: ./like_service
+      dockerfile: src/dockerfile
+    environment:
+      - DATABASE_URL=mysql+pymysql://user:password@mysql/social_media
+    depends_on:
+      - mysql
+
+  search_service:
+    build: 
+      context: ./search_service
+      dockerfile: src/dockerfile
+    depends_on:
+      - elasticsearch
+
+  api_gateway:
+    build: 
+      context: ./api_gateway
+      dockerfile: src/dockerfile
+    depends_on:
+      - user_service
+      - discussion_service
+      - comment_service
+      - like_service
+      - search_service
+    ports:
+      - "5000:5000"
+
+volumes:
+  mysql_data:

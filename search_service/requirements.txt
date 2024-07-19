@@ -1,0 +1,7 @@
+cryptography
+Flask
+Flask-SQLAlchemy
+pymysql
+requests
+elasticsearch
+flask-migrate
