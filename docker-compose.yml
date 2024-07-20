@@ -2,10 +2,10 @@ services:
   mysql:
     image: mysql:8.0
     environment:
-      MYSQL_ROOT_PASSWORD: rootpassword
-      MYSQL_DATABASE: social_media
-      MYSQL_USER: user
-      MYSQL_PASSWORD: password
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     ports:
       - "3307:3306"
     volumes:
@@ -24,10 +24,10 @@ services:
       context: ./user_service
       dockerfile: src/dockerfile
     environment:
-      - DATABASE_URL=mysql+pymysql://user:password@mysql/social_media
-      - SECRET_KEY=mysecret
-      - ELASTICSEARCH_URL=http://elasticsearch:9200
-      - ELASTICSEARCH_SSL_VERIFY=false
+      - DATABASE_URL=mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql/${MYSQL_DATABASE}
+      - SECRET_KEY=${SECRET_KEY}
+      - ELASTICSEARCH_URL=${ELASTICSEARCH_URL}
+      - ELASTICSEARCH_SSL_VERIFY=${ELASTICSEARCH_SSL_VERIFY}
     depends_on:
       - mysql
       - elasticsearch
@@ -37,10 +37,10 @@ services:
       context: ./discussion_service
       dockerfile: src/dockerfile
     environment:
-      - DATABASE_URL=mysql+pymysql://user:password@mysql/social_media
-      - SECRET_KEY=mysecret
-      - ELASTICSEARCH_URL=http://elasticsearch:9200
-      - ELASTICSEARCH_SSL_VERIFY=false
+      - DATABASE_URL=mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql/${MYSQL_DATABASE}
+      - SECRET_KEY=${SECRET_KEY}
+      - ELASTICSEARCH_URL=${ELASTICSEARCH_URL}
+      - ELASTICSEARCH_SSL_VERIFY=${ELASTICSEARCH_SSL_VERIFY}
     depends_on:
       - mysql
       - elasticsearch
@@ -50,10 +50,10 @@ services:
       context: ./comment_service
       dockerfile: src/dockerfile
     environment:
-      - DATABASE_URL=mysql+pymysql://user:password@mysql/social_media
-      - SECRET_KEY=mysecret
-      - ELASTICSEARCH_URL=http://elasticsearch:9200
-      - ELASTICSEARCH_SSL_VERIFY=false
+      - DATABASE_URL=mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql/${MYSQL_DATABASE}
+      - SECRET_KEY=${SECRET_KEY}
+      - ELASTICSEARCH_URL=${ELASTICSEARCH_URL}
+      - ELASTICSEARCH_SSL_VERIFY=${ELASTICSEARCH_SSL_VERIFY}
     depends_on:
       - mysql
       - elasticsearch
@@ -63,10 +63,10 @@ services:
       context: ./like_service
       dockerfile: src/dockerfile
     environment:
-      - DATABASE_URL=mysql+pymysql://user:password@mysql/social_media
-      - SECRET_KEY=mysecret
-      - ELASTICSEARCH_URL=http://elasticsearch:9200
-      - ELASTICSEARCH_SSL_VERIFY=false
+      - DATABASE_URL=mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql/${MYSQL_DATABASE}
+      - SECRET_KEY=${SECRET_KEY}
+      - ELASTICSEARCH_URL=${ELASTICSEARCH_URL}
+      - ELASTICSEARCH_SSL_VERIFY=${ELASTICSEARCH_SSL_VERIFY}
     depends_on:
       - mysql
       - elasticsearch
@@ -76,9 +76,9 @@ services:
       context: ./search_service
       dockerfile: src/dockerfile
     environment:
-      - ELASTICSEARCH_URL=http://elasticsearch:9200
-      - ELASTICSEARCH_SSL_VERIFY=false
-      - SECRET_KEY=mysecret
+      - ELASTICSEARCH_URL=${ELASTICSEARCH_URL}
+      - ELASTICSEARCH_SSL_VERIFY=${ELASTICSEARCH_SSL_VERIFY}
+      - SECRET_KEY=${SECRET_KEY}
     depends_on:
       - elasticsearch
 
