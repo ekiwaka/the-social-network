@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify
+from sqlalchemy.exc import SQLAlchemyError
 from models import db, User, Follow
 import os
 import jwt
@@ -94,12 +95,15 @@ def login():
     - 200 OK: { "token": "<jwt_token>" }
     - 401 Unauthorized: { "message": "Invalid credentials!" }
     """
-    data = request.get_json()
-    user = User.query.filter_by(email=data['email']).first()
-    if not user or not check_password_hash(user.password, data['password']):
-        return jsonify({'message': 'Invalid credentials!'}), 401
-    token = jwt.encode({'user_id': user.id, 'exp': datetime.datetime.now() + datetime.timedelta(hours=24)}, app.config['SECRET_KEY'], algorithm="HS256")
-    return jsonify({'token': token})
+    try:
+        data = request.get_json()
+        user = User.query.filter_by(email=data['email']).first()
+        if not user or not check_password_hash(user.password, data['password']):
+            return jsonify({'message': 'Invalid credentials!'}), 401
+        token = jwt.encode({'user_id': user.id, 'exp': datetime.datetime.now() + datetime.timedelta(hours=24)}, app.config['SECRET_KEY'], algorithm="HS256")
+        return jsonify({'token': token})
+    except Exception as e:
+        return jsonify({'message': 'Internal server error', 'error': str(e)}), 500
 
 @app.route('/users', methods=['POST'])
 def create_user():
@@ -113,21 +117,27 @@ def create_user():
     - 201 Created: { "message": "User created successfully" }
     - 409 Conflict: { "message": "User with this email or mobile number already exists" }
     """
-    data = request.get_json()
-    existing_user = User.query.filter(
-        (User.email == data['email']) | (User.mobile_no == data['mobile_no'])
-    ).first()
+    try:
+        data = request.get_json()
+        existing_user = User.query.filter(
+            (User.email == data['email']) | (User.mobile_no == data['mobile_no'])
+        ).first()
 
-    if existing_user:
-        return jsonify({'message': 'User with this email or mobile number already exists'}), 409
+        if existing_user:
+            return jsonify({'message': 'User with this email or mobile number already exists'}), 409
 
-    hashed_password = generate_password_hash(data['password'])
-    new_user = User(name=data['name'], mobile_no=data['mobile_no'], email=data['email'], password=hashed_password)
-    db.session.add(new_user)
-    db.session.commit()
-    index_user_to_elasticsearch(new_user)
+        hashed_password = generate_password_hash(data['password'])
+        new_user = User(name=data['name'], mobile_no=data['mobile_no'], email=data['email'], password=hashed_password)
+        db.session.add(new_user)
+        db.session.commit()
+        index_user_to_elasticsearch(new_user)
 
-    return jsonify({'message': 'User created successfully'}), 201
+        return jsonify({'message': 'User created successfully'}), 201
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return jsonify({'message': 'Database error', 'error': str(e)}), 500
+    except Exception as e:
+        return jsonify({'message': 'Internal server error', 'error': str(e)}), 500
 
 @app.route('/users/<user_id>', methods=['PUT'])
 @token_required
@@ -145,18 +155,24 @@ def update_user(current_user, user_id):
     - 200 OK: { "message": "User updated successfully" }
     - 403 Forbidden: { "message": "Permission denied!" }
     """
-    if current_user.id != int(user_id):
-        return jsonify({'message': 'Permission denied!'}), 403
-    data = request.get_json()
-    current_user.name = data['name']
-    current_user.mobile_no = data['mobile_no']
-    current_user.email = data['email']
-    if 'password' in data:
-        current_user.password = generate_password_hash(data['password'])
-    db.session.commit()
-    index_user_to_elasticsearch(current_user)
+    try:
+        if current_user.id != int(user_id):
+            return jsonify({'message': 'Permission denied!'}), 403
+        data = request.get_json()
+        current_user.name = data['name']
+        current_user.mobile_no = data['mobile_no']
+        current_user.email = data['email']
+        if 'password' in data:
+            current_user.password = generate_password_hash(data['password'])
+        db.session.commit()
+        index_user_to_elasticsearch(current_user)
 
-    return jsonify({'message': 'User updated successfully'})
+        return jsonify({'message': 'User updated successfully'})
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return jsonify({'message': 'Database error', 'error': str(e)}), 500
+    except Exception as e:
+        return jsonify({'message': 'Internal server error', 'error': str(e)}), 500
 
 @app.route('/users/<user_id>', methods=['DELETE'])
 @token_required
@@ -172,33 +188,36 @@ def delete_user(current_user, user_id):
     - 403 Forbidden: { "message": "Permission denied!" }
     - 404 Not Found: { "message": "User not found!" }
     """
-    if current_user.id != int(user_id):
-        return jsonify({'message': 'Permission denied!'}), 403
+    try:
+        if current_user.id != int(user_id):
+            return jsonify({'message': 'Permission denied!'}), 403
 
-    user_to_delete = User.query.get(user_id)
-    if not user_to_delete:
-        return jsonify({'message': 'User not found!'}), 404
+        user_to_delete = User.query.get(user_id)
+        if not user_to_delete:
+            return jsonify({'message': 'User not found!'}), 404
 
-    # Remove all follow relationships where the user is either the follower or followee
-    follows_as_follower = Follow.query.filter_by(follower_id=user_id).all()
-    follows_as_followee = Follow.query.filter_by(followee_id=user_id).all()
+        follows_as_follower = Follow.query.filter_by(follower_id=user_id).all()
+        follows_as_followee = Follow.query.filter_by(followee_id=user_id).all()
 
-    for follow in follows_as_follower:
-        db.session.delete(follow)
-        delete_follow_from_elasticsearch(follow.follower_id, follow.followee_id)
-    
-    for follow in follows_as_followee:
-        db.session.delete(follow)
-        delete_follow_from_elasticsearch(follow.follower_id, follow.followee_id)
+        for follow in follows_as_follower:
+            db.session.delete(follow)
+            delete_follow_from_elasticsearch(follow.follower_id, follow.followee_id)
+        
+        for follow in follows_as_followee:
+            db.session.delete(follow)
+            delete_follow_from_elasticsearch(follow.follower_id, follow.followee_id)
 
-    # Remove the user from the database
-    db.session.delete(user_to_delete)
-    db.session.commit()
+        db.session.delete(user_to_delete)
+        db.session.commit()
 
-    # Delete user from Elasticsearch
-    delete_user_from_elasticsearch(user_id)
+        delete_user_from_elasticsearch(user_id)
 
-    return jsonify({'message': 'User and associated follow relationships deleted successfully'})
+        return jsonify({'message': 'User and associated follow relationships deleted successfully'})
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return jsonify({'message': 'Database error', 'error': str(e)}), 500
+    except Exception as e:
+        return jsonify({'message': 'Internal server error', 'error': str(e)}), 500
 
 @app.route('/users/<user_id>/follow', methods=['POST'])
 @token_required
@@ -214,23 +233,25 @@ def follow_user(current_user, user_id):
     - 400 Bad Request: { "message": "You cannot follow yourself!" }
     - 400 Bad Request: { "message": "Already following this user!" }
     """
-    if current_user.id == int(user_id):
-        return jsonify({'message': 'You cannot follow yourself!'}), 400
+    try:
+        if current_user.id == int(user_id):
+            return jsonify({'message': 'You cannot follow yourself!'}), 400
 
-    # Check if the follow relationship already exists
-    existing_follow = Follow.query.filter_by(follower_id=current_user.id, followee_id=user_id).first()
-    if existing_follow:
-        return jsonify({'message': 'Already following this user!'}), 400
+        existing_follow = Follow.query.filter_by(follower_id=current_user.id, followee_id=user_id).first()
+        if existing_follow:
+            return jsonify({'message': 'Already following this user!'}), 400
 
-    # Create and add the follow relationship
-    follow = Follow(follower_id=current_user.id, followee_id=user_id)
-    db.session.add(follow)
-    db.session.commit()
+        follow = Follow(follower_id=current_user.id, followee_id=user_id)
+        db.session.add(follow)
+        db.session.commit()
+        index_follow_to_elasticsearch(current_user.id, user_id)
 
-    # Index the follow relationship in Elasticsearch
-    index_follow_to_elasticsearch(current_user.id, user_id)
-
-    return jsonify({'message': 'Successfully followed user!'})
+        return jsonify({'message': 'Successfully followed user!'})
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return jsonify({'message': 'Database error', 'error': str(e)}), 500
+    except Exception as e:
+        return jsonify({'message': 'Internal server error', 'error': str(e)}), 500
 
 @app.route('/users/<user_id>/unfollow', methods=['POST'])
 @token_required
@@ -246,22 +267,25 @@ def unfollow_user(current_user, user_id):
     - 400 Bad Request: { "message": "You cannot unfollow yourself!" }
     - 400 Bad Request: { "message": "You are not following this user!" }
     """
-    if current_user.id == int(user_id):
-        return jsonify({'message': 'You cannot unfollow yourself!'}), 400
+    try:
+        if current_user.id == int(user_id):
+            return jsonify({'message': 'You cannot unfollow yourself!'}), 400
 
-    # Check if the follow relationship exists
-    follow = Follow.query.filter_by(follower_id=current_user.id, followee_id=user_id).first()
-    if not follow:
-        return jsonify({'message': 'You are not following this user!'}), 400
+        follow = Follow.query.filter_by(follower_id=current_user.id, followee_id=user_id).first()
+        if not follow:
+            return jsonify({'message': 'You are not following this user!'}), 400
 
-    # Delete the follow relationship
-    db.session.delete(follow)
-    db.session.commit()
+        db.session.delete(follow)
+        db.session.commit()
+        delete_follow_from_elasticsearch(current_user.id, user_id)
 
-    # Remove the follow relationship from Elasticsearch
-    delete_follow_from_elasticsearch(current_user.id, user_id)
+        return jsonify({'message': 'Successfully unfollowed user!'})
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return jsonify({'message': 'Database error', 'error': str(e)}), 500
+    except Exception as e:
+        return jsonify({'message': 'Internal server error', 'error': str(e)}), 500
 
-    return jsonify({'message': 'Successfully unfollowed user!'})
 
 @app.route('/users/followers', methods=['GET'])
 @token_required

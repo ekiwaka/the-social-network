@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify
+from sqlalchemy.exc import SQLAlchemyError
 from models import db, Comment
 import os
 from functools import wraps
@@ -76,15 +77,26 @@ def create_comment(user_id):
     Response:
     - 201 Created: { "message": "Comment created successfully" }
     """
-    data = request.get_json()
-    new_comment = Comment(text=data['text'], discussion_id=data['discussion_id'], user_id=user_id, created_on=datetime.datetime.now())
-    db.session.add(new_comment)
-    db.session.commit()
+    try:
+        data = request.get_json()
+        new_comment = Comment(
+            text=data['text'],
+            discussion_id=data['discussion_id'],
+            user_id=user_id,
+            created_on=datetime.datetime.now()
+        )
+        db.session.add(new_comment)
+        db.session.commit()
 
-    # Index the comment in Elasticsearch
-    index_comment_to_elasticsearch(new_comment)
+        # Index the comment in Elasticsearch
+        index_comment_to_elasticsearch(new_comment)
 
-    return jsonify({'message': 'Comment created successfully'}), 201
+        return jsonify({'message': 'Comment created successfully'}), 201
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return jsonify({'message': 'Database error', 'error': str(e)}), 500
+    except Exception as e:
+        return jsonify({'message': 'Internal server error', 'error': str(e)}), 500
 
 @app.route('/comments/<comment_id>', methods=['PUT'])
 @token_required
@@ -103,17 +115,26 @@ def update_comment(user_id, comment_id):
     - 200 OK: { "message": "Comment updated successfully" }
     - 403 Forbidden: { "message": "Permission denied!" }
     """
-    comment = Comment.query.get(comment_id)
-    if comment.user_id != user_id:
-        return jsonify({'message': 'Permission denied!'}), 403
-    data = request.get_json()
-    comment.text = data['text']
-    db.session.commit()
+    try:
+        comment = Comment.query.get(comment_id)
+        if comment is None:
+            return jsonify({'message': 'Comment not found!'}), 404
+        if comment.user_id != user_id:
+            return jsonify({'message': 'Permission denied!'}), 403
 
-    # Update comment in Elasticsearch (optional)
-    index_comment_to_elasticsearch(comment)
+        data = request.get_json()
+        comment.text = data['text']
+        db.session.commit()
 
-    return jsonify({'message': 'Comment updated successfully'})
+        # Update comment in Elasticsearch
+        index_comment_to_elasticsearch(comment)
+
+        return jsonify({'message': 'Comment updated successfully'})
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return jsonify({'message': 'Database error', 'error': str(e)}), 500
+    except Exception as e:
+        return jsonify({'message': 'Internal server error', 'error': str(e)}), 500
 
 @app.route('/comments/<comment_id>', methods=['DELETE'])
 @token_required
@@ -129,16 +150,26 @@ def delete_comment(user_id, comment_id):
     - 200 OK: { "message": "Comment deleted successfully" }
     - 403 Forbidden: { "message": "Permission denied!" }
     """
-    comment = Comment.query.get(comment_id)
-    if comment.user_id != user_id:
-        return jsonify({'message': 'Permission denied!'}), 403
-    db.session.delete(comment)
-    db.session.commit()
+    try:
+        comment = Comment.query.get(comment_id)
+        if comment is None:
+            return jsonify({'message': 'Comment not found!'}), 404
+        if comment.user_id != user_id:
+            return jsonify({'message': 'Permission denied!'}), 403
 
-    # Delete comment from Elasticsearch
-    delete_comment_from_elasticsearch(comment_id)
+        db.session.delete(comment)
+        db.session.commit()
 
-    return jsonify({'message': 'Comment deleted successfully'})
+        # Delete comment from Elasticsearch
+        delete_comment_from_elasticsearch(comment_id)
+
+        return jsonify({'message': 'Comment deleted successfully'})
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return jsonify({'message': 'Database error', 'error': str(e)}), 500
+    except Exception as e:
+        return jsonify({'message': 'Internal server error', 'error': str(e)}), 500
+
 
 @app.route('/user/comments', methods=['GET'])
 @token_required

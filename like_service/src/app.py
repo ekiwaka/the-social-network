@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify
+from sqlalchemy.exc import SQLAlchemyError
 from models import db, Like
 import os
 from functools import wraps
@@ -74,22 +75,28 @@ def create_like(user_id):
     Response:
     - 201 Created: { "message": "Like created successfully" }
     """
-    data = request.get_json()
-    target_id = data['target_id']
-    target_type = data['target_type']
+    try:
+        data = request.get_json()
+        target_id = data['target_id']
+        target_type = data['target_type']
 
-    # Validate target_type
-    if target_type not in ['discussion', 'comment']:
-        return jsonify({'message': 'Invalid target_type!'}), 400
+        # Validate target_type
+        if target_type not in ['discussion', 'comment']:
+            return jsonify({'message': 'Invalid target_type!'}), 400
 
-    new_like = Like(user_id=user_id, target_id=target_id, target_type=target_type)
-    db.session.add(new_like)
-    db.session.commit()
+        new_like = Like(user_id=user_id, target_id=target_id, target_type=target_type)
+        db.session.add(new_like)
+        db.session.commit()
 
-    # Index the like in Elasticsearch
-    index_like_to_elasticsearch(new_like)
+        # Index the like in Elasticsearch
+        index_like_to_elasticsearch(new_like)
 
-    return jsonify({'message': 'Like created successfully'}), 201
+        return jsonify({'message': 'Like created successfully'}), 201
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return jsonify({'message': 'Database error', 'error': str(e)}), 500
+    except Exception as e:
+        return jsonify({'message': 'Internal server error', 'error': str(e)}), 500
 
 @app.route('/likes/<like_id>', methods=['DELETE'])
 @token_required
@@ -105,17 +112,26 @@ def delete_like(user_id, like_id):
     - 200 OK: { "message": "Like deleted successfully" }
     - 403 Forbidden: { "message": "Permission denied!" }
     """
-    like = Like.query.get(like_id)
-    if like.user_id != user_id:
-        return jsonify({'message': 'Permission denied!'}), 403
-    
-    db.session.delete(like)
-    db.session.commit()
+    try:
+        like = Like.query.get(like_id)
+        if like is None:
+            return jsonify({'message': 'Like not found!'}), 404
+        if like.user_id != user_id:
+            return jsonify({'message': 'Permission denied!'}), 403
 
-    # Delete like from Elasticsearch
-    delete_like_from_elasticsearch(like_id)
+        db.session.delete(like)
+        db.session.commit()
 
-    return jsonify({'message': 'Like deleted successfully'})
+        # Delete like from Elasticsearch
+        delete_like_from_elasticsearch(like_id)
+
+        return jsonify({'message': 'Like deleted successfully'})
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return jsonify({'message': 'Database error', 'error': str(e)}), 500
+    except Exception as e:
+        return jsonify({'message': 'Internal server error', 'error': str(e)}), 500
+
 
 @app.route('/user/likes', methods=['GET'])
 @token_required

@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify
+from sqlalchemy.exc import SQLAlchemyError
 from models import db, Discussion
 import os
 from functools import wraps
@@ -77,21 +78,27 @@ def create_discussion(user_id):
     Response:
     - 201 Created: { "message": "Discussion created successfully" }
     """
-    data = request.get_json()
-    new_discussion = Discussion(
-        text=data['text'],
-        image=data['image'],
-        hashtags=data['hashtags'],
-        user_id=user_id,
-        created_on=datetime.datetime.now()
-    )
-    db.session.add(new_discussion)
-    db.session.commit()
+    try:
+        data = request.get_json()
+        new_discussion = Discussion(
+            text=data['text'],
+            image=data['image'],
+            hashtags=data['hashtags'],
+            user_id=user_id,
+            created_on=datetime.datetime.now()
+        )
+        db.session.add(new_discussion)
+        db.session.commit()
 
-    # Index the discussion in Elasticsearch
-    index_discussion_to_elasticsearch(new_discussion)
+        # Index the discussion in Elasticsearch
+        index_discussion_to_elasticsearch(new_discussion)
 
-    return jsonify({'message': 'Discussion created successfully'}), 201
+        return jsonify({'message': 'Discussion created successfully'}), 201
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return jsonify({'message': 'Database error', 'error': str(e)}), 500
+    except Exception as e:
+        return jsonify({'message': 'Internal server error', 'error': str(e)}), 500
 
 @app.route('/discussions/<discussion_id>', methods=['PUT'])
 @token_required
@@ -110,20 +117,28 @@ def update_discussion(user_id, discussion_id):
     - 200 OK: { "message": "Discussion updated successfully" }
     - 403 Forbidden: { "message": "Permission denied!" }
     """
-    discussion = Discussion.query.get(discussion_id)
-    if discussion.user_id != user_id:
-        return jsonify({'message': 'Permission denied!'}), 403
-    
-    data = request.get_json()
-    discussion.text = data['text']
-    discussion.image = data['image']
-    discussion.hashtags = data['hashtags']
-    db.session.commit()
+    try:
+        discussion = Discussion.query.get(discussion_id)
+        if discussion is None:
+            return jsonify({'message': 'Discussion not found!'}), 404
+        if discussion.user_id != user_id:
+            return jsonify({'message': 'Permission denied!'}), 403
 
-    # Update discussion in Elasticsearch
-    index_discussion_to_elasticsearch(discussion)
+        data = request.get_json()
+        discussion.text = data['text']
+        discussion.image = data['image']
+        discussion.hashtags = data['hashtags']
+        db.session.commit()
 
-    return jsonify({'message': 'Discussion updated successfully'})
+        # Update discussion in Elasticsearch
+        index_discussion_to_elasticsearch(discussion)
+
+        return jsonify({'message': 'Discussion updated successfully'})
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return jsonify({'message': 'Database error', 'error': str(e)}), 500
+    except Exception as e:
+        return jsonify({'message': 'Internal server error', 'error': str(e)}), 500
 
 @app.route('/discussions/<discussion_id>', methods=['DELETE'])
 @token_required
@@ -139,17 +154,26 @@ def delete_discussion(user_id, discussion_id):
     - 200 OK: { "message": "Discussion deleted successfully" }
     - 403 Forbidden: { "message": "Permission denied!" }
     """
-    discussion = Discussion.query.get(discussion_id)
-    if discussion.user_id != user_id:
-        return jsonify({'message': 'Permission denied!'}), 403
-    
-    db.session.delete(discussion)
-    db.session.commit()
+    try:
+        discussion = Discussion.query.get(discussion_id)
+        if discussion is None:
+            return jsonify({'message': 'Discussion not found!'}), 404
+        if discussion.user_id != user_id:
+            return jsonify({'message': 'Permission denied!'}), 403
 
-    # Delete discussion from Elasticsearch
-    delete_discussion_from_elasticsearch(discussion_id)
+        db.session.delete(discussion)
+        db.session.commit()
 
-    return jsonify({'message': 'Discussion deleted successfully'})
+        # Delete discussion from Elasticsearch
+        delete_discussion_from_elasticsearch(discussion_id)
+
+        return jsonify({'message': 'Discussion deleted successfully'})
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return jsonify({'message': 'Database error', 'error': str(e)}), 500
+    except Exception as e:
+        return jsonify({'message': 'Internal server error', 'error': str(e)}), 500
+
 
 @app.route('/user/discussions', methods=['GET'])
 @token_required
