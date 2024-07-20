@@ -48,7 +48,7 @@ def index_comment_to_elasticsearch(comment):
             'text': comment.text,
             'discussion_id': comment.discussion_id,
             'user_id': comment.user_id,
-            'created_on': comment.created_on.isoformat()
+            'created_at': comment.created_at.isoformat()
         })
     except Exception as e:
         # Handle Elasticsearch indexing error
@@ -83,7 +83,7 @@ def create_comment(user_id):
             text=data['text'],
             discussion_id=data['discussion_id'],
             user_id=user_id,
-            created_on=datetime.datetime.now()
+            created_at=datetime.datetime.now()
         )
         db.session.add(new_comment)
         db.session.commit()
@@ -171,7 +171,7 @@ def delete_comment(user_id, comment_id):
         return jsonify({'message': 'Internal server error', 'error': str(e)}), 500
 
 
-@app.route('/user/comments', methods=['GET'])
+@app.route('/comments', methods=['GET'])
 @token_required
 def list_user_comments(user_id):
     """
@@ -186,7 +186,7 @@ def list_user_comments(user_id):
     - user_id (path): ID of the authenticated user (extracted from the token).
 
     Response:
-    - 200 OK: { "comments": [ { "id": "<comment_id>", "text": "<text>", "discussion_id": "<discussion_id>", "created_on": "<timestamp>" }, ... ], "page": <page>, "per_page": <per_page>, "total": <total> }
+    - 200 OK: { "comments": [ { "id": "<comment_id>", "text": "<text>", "discussion_id": "<discussion_id>", "created_at": "<timestamp>" }, ... ], "page": <page>, "per_page": <per_page>, "total": <total> }
     """
     try:
         # Get pagination parameters from query string
@@ -203,7 +203,7 @@ def list_user_comments(user_id):
                 }
             },
             "sort": [
-                {"created_on": {"order": "desc"}}
+                {"created_at": {"order": "desc"}}
             ],
             "from": (page - 1) * per_page,
             "size": per_page
@@ -217,7 +217,7 @@ def list_user_comments(user_id):
             'id': hit['_id'],
             'text': hit['_source']['text'],
             'discussion_id': hit['_source']['discussion_id'],
-            'created_on': hit['_source']['created_on']
+            'created_at': hit['_source']['created_at']
         } for hit in response['hits']['hits']]
 
         # Prepare response

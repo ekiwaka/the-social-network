@@ -68,34 +68,7 @@ def search_users():
         users = [{'id': hit['_id'], 'name': hit['_source']['name'], 'mobile_no': hit['_source']['mobile_no'], 'email': hit['_source']['email']} for hit in res['hits']['hits']]
         return jsonify(users), 200
     except Exception as e:
-        return jsonify({'message': 'Error executing search query', 'error': str(e)}), 500
-
-@app.route('/search/discussions', methods=['GET'])
-@token_required
-def search_discussions():
-    """
-    Search for discussions based on a query parameter. Searches across text and hashtags fields.
-
-    Query Parameters:
-    - query (str): The search query.
-
-    Response:
-    - 200 OK: Returns a list of discussions matching the search query.
-    - 400 Bad Request: If the query parameter is missing.
-    - 500 Internal Server Error: If there's an error executing the search query.
-    """
-    query = request.args.get('query')
-    if not query:
-        return jsonify({'message': 'Query parameter is required!'}), 400
-
-    es_query = {"query": {"multi_match": {"query": query, "fields": ["text", "hashtags"]}}}
-    
-    try:
-        res = es.search(index="discussions", body=es_query)
-        discussions = [{'id': hit['_id'], 'user_id': hit['_source']['user_id'], 'text': hit['_source']['text'], 'image': hit['_source']['image'], 'created_at': hit['_source']['created_at']} for hit in res['hits']['hits']]
-        return jsonify(discussions), 200
-    except Exception as e:
-        return jsonify({'message': 'Error executing search query', 'error': str(e)}), 500
+        return jsonify({'message': 'Error while searching for user', 'error': str(e)}), 500
 
 @app.route('/search/discussions_by_text', methods=['GET'])
 @token_required
@@ -122,7 +95,7 @@ def search_discussions_by_text():
         discussions = [{'id': hit['_id'], 'user_id': hit['_source']['user_id'], 'text': hit['_source']['text'], 'image': hit['_source']['image'], 'created_at': hit['_source']['created_at']} for hit in res['hits']['hits']]
         return jsonify(discussions), 200
     except Exception as e:
-        return jsonify({'message': 'Error executing search query', 'error': str(e)}), 500
+        return jsonify({'message': 'Error while searching for discussion by text', 'error': str(e)}), 500
 
 @app.route('/search/discussions_by_hashtag', methods=['GET'])
 @token_required
@@ -149,4 +122,4 @@ def search_discussions_by_hashtag():
         discussions = [{'id': hit['_id'], 'user_id': hit['_source']['user_id'], 'text': hit['_source']['text'], 'image': hit['_source']['image'], 'created_at': hit['_source']['created_at']} for hit in res['hits']['hits']]
         return jsonify(discussions), 200
     except Exception as e:
-        return jsonify({'message': 'Error executing search query', 'error': str(e)}), 500
+        return jsonify({'message': 'Error while searching for discussion by hashtag', 'error': str(e)}), 500

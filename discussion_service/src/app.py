@@ -48,7 +48,7 @@ def index_discussion_to_elasticsearch(discussion):
             'text': discussion.text,
             'image': discussion.image,
             'hashtags': discussion.hashtags,
-            'created_on': discussion.created_on.isoformat(),
+            'created_at': discussion.created_at.isoformat(),
             'user_id': discussion.user_id
         })
     except Exception as e:
@@ -85,7 +85,7 @@ def create_discussion(user_id):
             image=data['image'],
             hashtags=data['hashtags'],
             user_id=user_id,
-            created_on=datetime.datetime.now()
+            created_at=datetime.datetime.now()
         )
         db.session.add(new_discussion)
         db.session.commit()
@@ -175,7 +175,7 @@ def delete_discussion(user_id, discussion_id):
         return jsonify({'message': 'Internal server error', 'error': str(e)}), 500
 
 
-@app.route('/user/discussions', methods=['GET'])
+@app.route('/discussions', methods=['GET'])
 @token_required
 def list_user_discussions(user_id):
     """
@@ -190,7 +190,7 @@ def list_user_discussions(user_id):
     - user_id (path): ID of the authenticated user (extracted from the token).
 
     Response:
-    - 200 OK: { "discussions": [ { "id": "<discussion_id>", "text": "<text>", "image": "<image_url>", "hashtags": "<hashtags>", "created_on": "<timestamp>" }, ... ], "page": <page>, "per_page": <per_page>, "total": <total> }
+    - 200 OK: { "discussions": [ { "id": "<discussion_id>", "text": "<text>", "image": "<image_url>", "hashtags": "<hashtags>", "created_at": "<timestamp>" }, ... ], "page": <page>, "per_page": <per_page>, "total": <total> }
     """
     try:
         # Get pagination parameters from query string
@@ -207,7 +207,7 @@ def list_user_discussions(user_id):
                 }
             },
             "sort": [
-                {"created_on": {"order": "desc"}}
+                {"created_at": {"order": "desc"}}
             ],
             "from": (page - 1) * per_page,
             "size": per_page
@@ -222,7 +222,7 @@ def list_user_discussions(user_id):
             'text': hit['_source']['text'],
             'image': hit['_source']['image'],
             'hashtags': hit['_source']['hashtags'],
-            'created_on': hit['_source']['created_on']
+            'created_at': hit['_source']['created_at']
         } for hit in response['hits']['hits']]
 
         # Prepare response

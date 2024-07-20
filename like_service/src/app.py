@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 from sqlalchemy.exc import SQLAlchemyError
-from models import db, Like
+from models import db, Like, TargetEntity
 import os
 from functools import wraps
 import jwt
@@ -43,10 +43,13 @@ def token_required(f):
 def index_like_to_elasticsearch(like):
     """Index a like document into Elasticsearch."""
     try:
+        target_entity = TargetEntity.query.get(like.target_entity_id)
         es.index(index='likes', id=like.id, body={
             'user_id': like.user_id,
-            'target_id': like.target_id,
-            'target_type': like.target_type
+            'target_entity_id': like.target_entity_id,
+            'entity_type': target_entity.entity_type,
+            'entity_id': target_entity.entity_id,
+            'created_at': like.created_at.isoformat()
         })
     except Exception as e:
         # Handle Elasticsearch indexing error
@@ -77,14 +80,21 @@ def create_like(user_id):
     """
     try:
         data = request.get_json()
-        target_id = data['target_id']
-        target_type = data['target_type']
+        entity_type = data['entity_type']
+        entity_id = data['entity_id']
 
-        # Validate target_type
-        if target_type not in ['discussion', 'comment']:
-            return jsonify({'message': 'Invalid target_type!'}), 400
+        # Validate entity_type
+        if entity_type not in ['discussion', 'comment']:
+            return jsonify({'message': 'Invalid entity_type!'}), 400
 
-        new_like = Like(user_id=user_id, target_id=target_id, target_type=target_type)
+        # Create or get TargetEntity
+        target_entity = TargetEntity.query.filter_by(entity_type=entity_type, entity_id=entity_id).first()
+        if not target_entity:
+            target_entity = TargetEntity(entity_type=entity_type, entity_id=entity_id)
+            db.session.add(target_entity)
+            db.session.flush()  # To get the target_entity.id before commit
+
+        new_like = Like(user_id=user_id, target_entity_id=target_entity.id)
         db.session.add(new_like)
         db.session.commit()
 
@@ -119,11 +129,21 @@ def delete_like(user_id, like_id):
         if like.user_id != user_id:
             return jsonify({'message': 'Permission denied!'}), 403
 
+        target_entity_id = like.target_entity_id
+
         db.session.delete(like)
         db.session.commit()
 
         # Delete like from Elasticsearch
         delete_like_from_elasticsearch(like_id)
+
+        # Check if there are any other likes for this target_entity_id
+        other_likes = Like.query.filter_by(target_entity_id=target_entity_id).count()
+        if other_likes == 0:
+            target_entity = TargetEntity.query.get(target_entity_id)
+            if target_entity:
+                db.session.delete(target_entity)
+                db.session.commit()
 
         return jsonify({'message': 'Like deleted successfully'})
     except SQLAlchemyError as e:
@@ -132,8 +152,7 @@ def delete_like(user_id, like_id):
     except Exception as e:
         return jsonify({'message': 'Internal server error', 'error': str(e)}), 500
 
-
-@app.route('/user/likes', methods=['GET'])
+@app.route('/likes', methods=['GET'])
 @token_required
 def list_user_likes(user_id):
     """
@@ -171,18 +190,16 @@ def list_user_likes(user_id):
             "size": per_page
         }
 
-        # Execute search query
         response = es.search(index='likes', body=query)
 
-        # Extract results
         likes_list = [{
             'id': hit['_id'],
-            'target_id': hit['_source']['target_id'],
-            'target_type': hit['_source']['target_type'],
+            'target_entity_id': hit['_source']['target_entity_id'],
+            'entity_type': hit['_source']['entity_type'],
+            'entity_id': hit['_source']['entity_id'],
             'created_at': hit['_source']['created_at']
         } for hit in response['hits']['hits']]
 
-        # Prepare response
         response_data = {
             'likes': likes_list,
             'page': page,
@@ -192,5 +209,4 @@ def list_user_likes(user_id):
 
         return jsonify(response_data), 200
     except Exception as e:
-        # Handle any unexpected errors
         return jsonify({'message': 'An error occurred while retrieving likes.', 'error': str(e)}), 500
