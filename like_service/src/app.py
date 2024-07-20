@@ -3,7 +3,6 @@ from models import db, Like
 import os
 from functools import wraps
 import jwt
-import datetime
 from elasticsearch import Elasticsearch
 
 app = Flask(__name__)
@@ -16,6 +15,18 @@ db.init_app(app)
 es = Elasticsearch(os.getenv('ELASTICSEARCH_URL'), verify_certs=False)
 
 def token_required(f):
+    """
+    Decorator to ensure that the request contains a valid JWT token.
+
+    Parameters:
+    - f: The function to be decorated.
+
+    Returns:
+    - A wrapper function that checks for a valid JWT token in the request headers.
+    
+    Response:
+    - 403 Forbidden: If the token is missing or invalid.
+    """
     @wraps(f)
     def decorated(*args, **kwargs):
         token = request.headers.get('Authorization')
@@ -33,7 +44,8 @@ def index_like_to_elasticsearch(like):
     try:
         es.index(index='likes', id=like.id, body={
             'user_id': like.user_id,
-            'discussion_id': like.discussion_id
+            'target_id': like.target_id,
+            'target_type': like.target_type
         })
     except Exception as e:
         # Handle Elasticsearch indexing error
@@ -50,8 +62,27 @@ def delete_like_from_elasticsearch(like_id):
 @app.route('/likes', methods=['POST'])
 @token_required
 def create_like(user_id):
+    """
+    Create a like for a discussion or comment by the authenticated user.
+
+    Request:
+    - JSON body: { "target_id": "<target_id>", "target_type": "<discussion|comment>" }
+
+    Parameters:
+    - user_id (path): ID of the authenticated user (extracted from the token).
+
+    Response:
+    - 201 Created: { "message": "Like created successfully" }
+    """
     data = request.get_json()
-    new_like = Like(user_id=user_id, discussion_id=data['discussion_id'])
+    target_id = data['target_id']
+    target_type = data['target_type']
+
+    # Validate target_type
+    if target_type not in ['discussion', 'comment']:
+        return jsonify({'message': 'Invalid target_type!'}), 400
+
+    new_like = Like(user_id=user_id, target_id=target_id, target_type=target_type)
     db.session.add(new_like)
     db.session.commit()
 
@@ -63,6 +94,17 @@ def create_like(user_id):
 @app.route('/likes/<like_id>', methods=['DELETE'])
 @token_required
 def delete_like(user_id, like_id):
+    """
+    Delete a like by the authenticated user.
+
+    Parameters:
+    - like_id (path): ID of the like to delete.
+    - user_id (path): ID of the authenticated user (extracted from the token).
+
+    Response:
+    - 200 OK: { "message": "Like deleted successfully" }
+    - 403 Forbidden: { "message": "Permission denied!" }
+    """
     like = Like.query.get(like_id)
     if like.user_id != user_id:
         return jsonify({'message': 'Permission denied!'}), 403
@@ -75,8 +117,64 @@ def delete_like(user_id, like_id):
 
     return jsonify({'message': 'Like deleted successfully'})
 
-@app.route('/likes', methods=['GET'])
+@app.route('/user/likes', methods=['GET'])
 @token_required
-def list_likes(user_id):
-    likes = Like.query.all()
-    return jsonify([{'id': l.id, 'user_id': l.user_id, 'discussion_id': l.discussion_id} for l in likes])
+def list_user_likes(user_id):
+    """
+    List all likes done by the authenticated user, ordered by the most recent.
+    Supports pagination through query parameters.
+
+    Query Parameters:
+    - page (int): Page number (default is 1).
+    - per_page (int): Number of likes per page (default is 10).
+
+    Parameters:
+    - user_id (path): ID of the authenticated user (extracted from the token).
+
+    Response:
+    - 200 OK: { "likes": [ { "id": "<like_id>", "target_id": "<target_id>", "target_type": "<discussion|comment>", "created_at": "<timestamp>" }, ... ], "page": <page>, "per_page": <per_page>, "total": <total> }
+    """
+    try:
+        # Get pagination parameters from query string
+        page = request.args.get('page', default=1, type=int)
+        per_page = request.args.get('per_page', default=10, type=int)
+
+        # Search for likes by the current user
+        query = {
+            "query": {
+                "bool": {
+                    "must": [
+                        {"match": {"user_id": user_id}}
+                    ]
+                }
+            },
+            "sort": [
+                {"created_at": {"order": "desc"}}
+            ],
+            "from": (page - 1) * per_page,
+            "size": per_page
+        }
+
+        # Execute search query
+        response = es.search(index='likes', body=query)
+
+        # Extract results
+        likes_list = [{
+            'id': hit['_id'],
+            'target_id': hit['_source']['target_id'],
+            'target_type': hit['_source']['target_type'],
+            'created_at': hit['_source']['created_at']
+        } for hit in response['hits']['hits']]
+
+        # Prepare response
+        response_data = {
+            'likes': likes_list,
+            'page': page,
+            'per_page': per_page,
+            'total': response['hits']['total']['value']
+        }
+
+        return jsonify(response_data), 200
+    except Exception as e:
+        # Handle any unexpected errors
+        return jsonify({'message': 'An error occurred while retrieving likes.', 'error': str(e)}), 500

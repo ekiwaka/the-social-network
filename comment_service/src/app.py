@@ -16,6 +16,18 @@ db.init_app(app)
 es = Elasticsearch(os.getenv('ELASTICSEARCH_URL'), verify_certs=False)
 
 def token_required(f):
+    """
+    Decorator to ensure that the request contains a valid JWT token.
+
+    Parameters:
+    - f: The function to be decorated.
+
+    Returns:
+    - A wrapper function that checks for a valid JWT token in the request headers.
+    
+    Response:
+    - 403 Forbidden: If the token is missing or invalid.
+    """
     @wraps(f)
     def decorated(*args, **kwargs):
         token = request.headers.get('Authorization')
@@ -52,6 +64,18 @@ def delete_comment_from_elasticsearch(comment_id):
 @app.route('/comments', methods=['POST'])
 @token_required
 def create_comment(user_id):
+    """
+    Create a new comment by the authenticated user.
+
+    Request:
+    - JSON body: { "text": "<text>", "discussion_id": "<discussion_id>" }
+
+    Parameters:
+    - user_id (path): ID of the authenticated user (extracted from the token).
+
+    Response:
+    - 201 Created: { "message": "Comment created successfully" }
+    """
     data = request.get_json()
     new_comment = Comment(text=data['text'], discussion_id=data['discussion_id'], user_id=user_id, created_on=datetime.datetime.now())
     db.session.add(new_comment)
@@ -65,6 +89,20 @@ def create_comment(user_id):
 @app.route('/comments/<comment_id>', methods=['PUT'])
 @token_required
 def update_comment(user_id, comment_id):
+    """
+    Update an existing comment by the authenticated user.
+
+    Request:
+    - JSON body: { "text": "<text>" }
+
+    Parameters:
+    - comment_id (path): ID of the comment to be updated.
+    - user_id (path): ID of the authenticated user (extracted from the token).
+
+    Response:
+    - 200 OK: { "message": "Comment updated successfully" }
+    - 403 Forbidden: { "message": "Permission denied!" }
+    """
     comment = Comment.query.get(comment_id)
     if comment.user_id != user_id:
         return jsonify({'message': 'Permission denied!'}), 403
@@ -80,6 +118,17 @@ def update_comment(user_id, comment_id):
 @app.route('/comments/<comment_id>', methods=['DELETE'])
 @token_required
 def delete_comment(user_id, comment_id):
+    """
+    Delete a comment by the authenticated user.
+
+    Parameters:
+    - comment_id (path): ID of the comment to be deleted.
+    - user_id (path): ID of the authenticated user (extracted from the token).
+
+    Response:
+    - 200 OK: { "message": "Comment deleted successfully" }
+    - 403 Forbidden: { "message": "Permission denied!" }
+    """
     comment = Comment.query.get(comment_id)
     if comment.user_id != user_id:
         return jsonify({'message': 'Permission denied!'}), 403
@@ -91,8 +140,64 @@ def delete_comment(user_id, comment_id):
 
     return jsonify({'message': 'Comment deleted successfully'})
 
-@app.route('/comments', methods=['GET'])
+@app.route('/user/comments', methods=['GET'])
 @token_required
-def list_comments():
-    comments = Comment.query.all()
-    return jsonify([{'id': c.id, 'text': c.text, 'discussion_id': c.discussion_id, 'user_id': c.user_id, 'created_on': c.created_on} for c in comments])
+def list_user_comments(user_id):
+    """
+    List all comments created by the authenticated user, ordered by the most recent.
+    Supports pagination through query parameters.
+
+    Query Parameters:
+    - page (int): Page number (default is 1).
+    - per_page (int): Number of comments per page (default is 10).
+
+    Parameters:
+    - user_id (path): ID of the authenticated user (extracted from the token).
+
+    Response:
+    - 200 OK: { "comments": [ { "id": "<comment_id>", "text": "<text>", "discussion_id": "<discussion_id>", "created_on": "<timestamp>" }, ... ], "page": <page>, "per_page": <per_page>, "total": <total> }
+    """
+    try:
+        # Get pagination parameters from query string
+        page = request.args.get('page', default=1, type=int)
+        per_page = request.args.get('per_page', default=10, type=int)
+
+        # Search for comments by the current user
+        query = {
+            "query": {
+                "bool": {
+                    "must": [
+                        {"match": {"user_id": user_id}}
+                    ]
+                }
+            },
+            "sort": [
+                {"created_on": {"order": "desc"}}
+            ],
+            "from": (page - 1) * per_page,
+            "size": per_page
+        }
+
+        # Execute search query
+        response = es.search(index='comments', body=query)
+
+        # Extract results
+        comments_list = [{
+            'id': hit['_id'],
+            'text': hit['_source']['text'],
+            'discussion_id': hit['_source']['discussion_id'],
+            'created_on': hit['_source']['created_on']
+        } for hit in response['hits']['hits']]
+
+        # Prepare response
+        response_data = {
+            'comments': comments_list,
+            'page': page,
+            'per_page': per_page,
+            'total': response['hits']['total']['value']
+        }
+
+        return jsonify(response_data), 200
+    except Exception as e:
+        # Handle any unexpected errors
+        return jsonify({'message': 'An error occurred while retrieving comments.', 'error': str(e)}), 500

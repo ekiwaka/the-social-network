@@ -10,6 +10,15 @@ LIKE_SERVICE_URL = 'http://like_service:5004'
 SEARCH_SERVICE_URL = 'http://search_service:5005'
 
 def forward_request(service_url):
+    """
+    Forwards the incoming HTTP request to the specified service URL.
+
+    Parameters:
+    - service_url (str): The base URL of the service to which the request should be forwarded.
+
+    Returns:
+    - Tuple: Contains the response content, status code, and headers from the forwarded request.
+    """
     response = requests.request(
         method=request.method,
         url=f"{service_url}{request.path}",
@@ -23,6 +32,15 @@ def forward_request(service_url):
 
 @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
 def proxy(path):
+    """
+    Proxy endpoint that routes requests to the appropriate service based on the request path.
+
+    Parameters:
+    - path (str): The path of the request, used to determine which service to forward the request to.
+
+    Returns:
+    - Response: The response from the forwarded request, or a 404 error if the path does not match any known services.
+    """
     if path.startswith('users') or path.startswith('login'):
         return forward_request(USER_SERVICE_URL)
     elif path.startswith('discussions'):

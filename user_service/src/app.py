@@ -17,6 +17,18 @@ db.init_app(app)
 es = Elasticsearch(os.getenv('ELASTICSEARCH_URL'), verify_certs=False)
 
 def token_required(f):
+    """
+    Decorator to ensure that the request contains a valid JWT token.
+
+    Parameters:
+    - f: The function to be decorated.
+
+    Returns:
+    - A wrapper function that checks for a valid JWT token in the request headers.
+    
+    Response:
+    - 403 Forbidden: If the token is missing or invalid.
+    """
     @wraps(f)
     def decorated(*args, **kwargs):
         token = request.headers.get('Authorization')
@@ -72,6 +84,16 @@ def delete_follow_from_elasticsearch(follower_id, followee_id):
 
 @app.route('/login', methods=['POST'])
 def login():
+    """
+    Authenticate a user and generate a JWT token.
+
+    Request:
+    - JSON body: { "email": "<user_email>", "password": "<user_password>" }
+
+    Response:
+    - 200 OK: { "token": "<jwt_token>" }
+    - 401 Unauthorized: { "message": "Invalid credentials!" }
+    """
     data = request.get_json()
     user = User.query.filter_by(email=data['email']).first()
     if not user or not check_password_hash(user.password, data['password']):
@@ -81,6 +103,16 @@ def login():
 
 @app.route('/users', methods=['POST'])
 def create_user():
+    """
+    Create a new user.
+
+    Request:
+    - JSON body: { "name": "<user_name>", "mobile_no": "<user_mobile_number>", "email": "<user_email>", "password": "<user_password>" }
+
+    Response:
+    - 201 Created: { "message": "User created successfully" }
+    - 409 Conflict: { "message": "User with this email or mobile number already exists" }
+    """
     data = request.get_json()
     existing_user = User.query.filter(
         (User.email == data['email']) | (User.mobile_no == data['mobile_no'])
@@ -100,6 +132,19 @@ def create_user():
 @app.route('/users/<user_id>', methods=['PUT'])
 @token_required
 def update_user(current_user, user_id):
+    """
+    Update user details.
+
+    Parameters:
+    - user_id (path): ID of the user to update.
+
+    Request:
+    - JSON body: { "name": "<user_name>", "mobile_no": "<user_mobile_number>", "email": "<user_email>", "password": "<user_password>" }
+
+    Response:
+    - 200 OK: { "message": "User updated successfully" }
+    - 403 Forbidden: { "message": "Permission denied!" }
+    """
     if current_user.id != int(user_id):
         return jsonify({'message': 'Permission denied!'}), 403
     data = request.get_json()
@@ -116,6 +161,17 @@ def update_user(current_user, user_id):
 @app.route('/users/<user_id>', methods=['DELETE'])
 @token_required
 def delete_user(current_user, user_id):
+    """
+    Delete a user and their follow relationships.
+
+    Parameters:
+    - user_id (path): ID of the user to delete.
+
+    Response:
+    - 200 OK: { "message": "User and associated follow relationships deleted successfully" }
+    - 403 Forbidden: { "message": "Permission denied!" }
+    - 404 Not Found: { "message": "User not found!" }
+    """
     if current_user.id != int(user_id):
         return jsonify({'message': 'Permission denied!'}), 403
 
@@ -147,6 +203,17 @@ def delete_user(current_user, user_id):
 @app.route('/users/<user_id>/follow', methods=['POST'])
 @token_required
 def follow_user(current_user, user_id):
+    """
+    Follow a user.
+
+    Parameters:
+    - user_id (path): ID of the user to follow.
+
+    Response:
+    - 200 OK: { "message": "Successfully followed user!" }
+    - 400 Bad Request: { "message": "You cannot follow yourself!" }
+    - 400 Bad Request: { "message": "Already following this user!" }
+    """
     if current_user.id == int(user_id):
         return jsonify({'message': 'You cannot follow yourself!'}), 400
 
@@ -168,6 +235,17 @@ def follow_user(current_user, user_id):
 @app.route('/users/<user_id>/unfollow', methods=['POST'])
 @token_required
 def unfollow_user(current_user, user_id):
+    """
+    Unfollow a user.
+
+    Parameters:
+    - user_id (path): ID of the user to unfollow.
+
+    Response:
+    - 200 OK: { "message": "Successfully unfollowed user!" }
+    - 400 Bad Request: { "message": "You cannot unfollow yourself!" }
+    - 400 Bad Request: { "message": "You are not following this user!" }
+    """
     if current_user.id == int(user_id):
         return jsonify({'message': 'You cannot unfollow yourself!'}), 400
 
@@ -188,7 +266,30 @@ def unfollow_user(current_user, user_id):
 @app.route('/users/followers', methods=['GET'])
 @token_required
 def list_followers(current_user):
-    
+    """
+    List all followers of the current user.
+
+    Query Parameters:
+    - page (optional, default 1): Page number to retrieve.
+    - per_page (optional, default 10): Number of items per page.
+
+    Response:
+    - 200 OK: {
+        "page": 1,
+        "per_page": 10,
+        "total": 25,
+        "followers": [
+            {
+                "id": 1,
+                "name": "John Doe",
+                "mobile_no": "1234567890",
+                "email": "john.doe@example.com"
+            }
+            // More follower objects
+        ]
+    }
+    - 500 Internal Server Error: { "message": "Error retrieving followers: <error_message>" }
+    """
     # Pagination parameters
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 10))
@@ -224,6 +325,30 @@ def list_followers(current_user):
 @app.route('/users/following', methods=['GET'])
 @token_required
 def list_following(current_user):
+    """
+    List all users that the current user is following.
+
+    Query Parameters:
+    - page (optional, default 1): Page number to retrieve.
+    - per_page (optional, default 10): Number of items per page.
+
+    Response:
+    - 200 OK: {
+        "page": 1,
+        "per_page": 10,
+        "total": 15,
+        "following": [
+            {
+                "id": 3,
+                "name": "Alice Johnson",
+                "mobile_no": "1122334455",
+                "email": "alice.johnson@example.com"
+            }
+            // More followed users
+        ]
+    }
+    - 500 Internal Server Error: { "message": "Error retrieving following users: <error_message>" }
+    """
     # Pagination parameters
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 10))
@@ -259,6 +384,30 @@ def list_following(current_user):
 @app.route('/users', methods=['GET'])
 @token_required
 def list_all_users(_):
+    """
+    List all users.
+
+    Query Parameters:
+    - page (optional, default 1): Page number to retrieve.
+    - per_page (optional, default 10): Number of items per page.
+
+    Response:
+    - 200 OK: {
+        "page": 1,
+        "per_page": 10,
+        "total": 50,
+        "users": [
+            {
+                "id": ,
+                "name": "",
+                "mobile_no": "",
+                "email": ""
+            }
+            // More user objects
+        ]
+    }
+    - 500 Internal Server Error: { "message": "Error retrieving users: <error_message>" }
+    """
     # Pagination parameters
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 10))
